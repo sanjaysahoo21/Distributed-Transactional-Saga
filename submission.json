@@ -1,0 +1,12 @@
+{
+    "successfulOrderId": "100",
+    "failingPaymentOrderId": "201",
+    "failingInventoryOrderId": "302",
+    "testCustomer": {
+        "id": 1
+    },
+    "testProduct": {
+        "id": 1,
+        "unitPrice": 50.00
+    }
+}
