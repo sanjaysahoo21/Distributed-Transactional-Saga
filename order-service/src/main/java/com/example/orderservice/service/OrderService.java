@@ -24,7 +24,7 @@ public class OrderService {
         this.stateMachineFactory = stateMachineFactory;
     }
 
-    public void createOrder(Order order){
+    public Order createOrder(Order order){
         order.setStatus(OrderState.ORDER_CREATED);
         Order saveOrder = orderRepository.save(order);
 
@@ -36,6 +36,8 @@ public class OrderService {
             .setHeader(ORDER_ID_HEADER, saveOrder.getId())
             .build();
         stateMachine.sendEvent(message);
+        
+        return saveOrder;
     }
 
 }
