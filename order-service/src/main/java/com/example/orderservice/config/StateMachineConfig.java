@@ -5,6 +5,7 @@ import org.springframework.statemachine.config.EnableStateMachineFactory;
 import org.springframework.statemachine.config.EnumStateMachineConfigurerAdapter;
 import org.springframework.statemachine.config.builders.StateMachineStateConfigurer;
 import org.springframework.statemachine.config.builders.StateMachineTransitionConfigurer;
+import org.springframework.statemachine.config.builders.StateMachineConfigurationConfigurer;
 
 import java.util.EnumSet;
 
@@ -12,6 +13,12 @@ import java.util.EnumSet;
 @Configuration
 @EnableStateMachineFactory
 public class StateMachineConfig extends EnumStateMachineConfigurerAdapter<OrderState, OrderEvent>{
+
+    private final OrderStateMachineInterceptor orderStateMachineInterceptor;
+
+    public StateMachineConfig(OrderStateMachineInterceptor orderStateMachineInterceptor) {
+        this.orderStateMachineInterceptor = orderStateMachineInterceptor;
+    }
 
     @Override
     public void configure(StateMachineStateConfigurer<OrderState, OrderEvent> states) throws Exception{
@@ -44,5 +51,11 @@ public class StateMachineConfig extends EnumStateMachineConfigurerAdapter<OrderS
                     .and() // here we initiate a refund schema to the user.
                 .withExternal()
                     .source(OrderState.INVENTORY_RESERVED).target(OrderState.ORDER_COMPLETED).event(OrderEvent.COMPLETE_ORDER); 
+    }
+
+    @Override
+    public void configure(StateMachineConfigurationConfigurer<OrderState, OrderEvent> config) throws Exception {
+        config.withConfiguration()
+                .stateMachineInterceptor(orderStateMachineInterceptor);
     }
 }
