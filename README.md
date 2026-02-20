@@ -159,21 +159,41 @@ docker compose ps
 
 All four containers should show status `Up` (or `Healthy` for the database).
 
+---
+
 ## API Endpoints
 
 ### Order Service (port 8080)
 
-| Method | Endpoint       | Description        |
-|--------|----------------|--------------------|
-| POST   | `/api/orders`  | Create a new order |
+| Method | Endpoint       | Description        | Success Code | Failure Code |
+|--------|----------------|--------------------|--------------|--------------|
+| POST   | `/api/orders`  | Create a new order | 201 Created  | 500 Internal Server Error |
 
-#### Create Order
+### Payment Service (port 8081)
 
-**Request:**
+| Method | Endpoint           | Description             | Success Code | Failure Code |
+|--------|--------------------|-------------------------|--------------|--------------|
+| POST   | `/payment`         | Process a payment       | 200 OK       | 400 Bad Request |
+| POST   | `/payment/cancel`  | Cancel/refund a payment | 200 OK       | 400 Bad Request |
+
+### Inventory Service (port 8082)
+
+| Method | Endpoint              | Description            | Success Code | Failure Code |
+|--------|-----------------------|------------------------|--------------|--------------|
+| POST   | `/inventory/reserve`  | Reserve inventory      | 200 OK       | 400 Bad Request |
+| POST   | `/inventory/release`  | Release reserved stock | 200 OK       | 400 Bad Request |
+
+---
+
+## Testing All Endpoints
+
+### 1. ✅ Create Order — Successful (amount ≤ 1000, quantity ≤ 100)
+
 ```bash
-curl -X POST http://localhost:8080/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{
+curl --request POST \
+  --url http://localhost:8080/api/orders \
+  --header "Content-Type: application/json" \
+  --data '{
     "customerId": 1,
     "productId": 101,
     "quantity": 5,
@@ -181,72 +201,181 @@ curl -X POST http://localhost:8080/api/orders \
   }'
 ```
 
-**Response (Success):**
+**Expected Response (HTTP 201 Created):**
 ```json
 {
   "id": "72562a9a-711d-4449-b7ef-aa191a4520b0",
   "customerId": 1,
   "productId": 101,
   "quantity": 5,
-  "amount": 100.0,
+  "amount": 100.00,
   "status": "INVENTORY_RESERVED"
 }
 ```
 
-### Payment Service (port 8081)
+**Saga Flow:** `ORDER_CREATED → PAYMENT_PENDING → PAYMENT_COMPLETED → INVENTORY_RESERVED`
 
-| Method | Endpoint           | Description             |
-|--------|--------------------|-------------------------|
-| POST   | `/payment`         | Process a payment       |
-| POST   | `/payment/cancel`  | Cancel/refund a payment |
+---
 
-### Inventory Service (port 8082)
-
-| Method | Endpoint              | Description            |
-|--------|-----------------------|------------------------|
-| POST   | `/inventory/reserve`  | Reserve inventory      |
-| POST   | `/inventory/release`  | Release reserved stock |
-
-## Test Scenarios
-
-### 1. Successful Order (Happy Path)
-
-Payment succeeds (amount ≤ 1000), inventory is reserved (quantity ≤ 100):
+### 2. ❌ Create Order — Payment Failure (amount > 1000)
 
 ```bash
-curl -s -X POST http://localhost:8080/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"customerId":1, "productId":101, "quantity":5, "amount":100.0}'
+curl --request POST \
+  --url http://localhost:8080/api/orders \
+  --header "Content-Type: application/json" \
+  --data '{
+    "customerId": 2,
+    "productId": 202,
+    "quantity": 10,
+    "amount": 5000.00
+  }'
 ```
 
-**Expected:** Status = `INVENTORY_RESERVED`  
-**Flow:** `ORDER_CREATED → PAYMENT_PENDING → PAYMENT_COMPLETED → INVENTORY_RESERVED`
+**Expected Response (HTTP 500 Internal Server Error):**
+```json
+{
+  "id": "e94a154b-5146-4a8c-ba9f-ac6bcf5ba4fb",
+  "customerId": 2,
+  "productId": 202,
+  "quantity": 10,
+  "amount": 5000.00,
+  "status": "ORDER_FAILED"
+}
+```
 
-### 2. Payment Failure
+**Saga Flow:** `ORDER_CREATED → PAYMENT_PENDING → ORDER_FAILED`
 
-Payment fails when amount > 1000 (insufficient funds):
+---
+
+### 3. ❌ Create Order — Inventory Failure with Payment Compensation (quantity > 100)
 
 ```bash
-curl -s -X POST http://localhost:8080/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"customerId":1, "productId":101, "quantity":5, "amount":2000.0}'
+curl --request POST \
+  --url http://localhost:8080/api/orders \
+  --header "Content-Type: application/json" \
+  --data '{
+    "customerId": 3,
+    "productId": 303,
+    "quantity": 200,
+    "amount": 50.00
+  }'
 ```
 
-**Expected:** Status = `ORDER_FAILED`  
-**Flow:** `ORDER_CREATED → PAYMENT_PENDING → ORDER_FAILED`
+**Expected Response (HTTP 500 Internal Server Error):**
+```json
+{
+  "id": "9a90aada-2b33-474c-b928-2cf9a5034139",
+  "customerId": 3,
+  "productId": 303,
+  "quantity": 200,
+  "amount": 50.00,
+  "status": "ORDER_FAILED"
+}
+```
 
-### 3. Inventory Failure with Payment Compensation
+**Saga Flow:** `ORDER_CREATED → PAYMENT_PENDING → PAYMENT_COMPLETED → ORDER_FAILED` (payment automatically compensated)
 
-Payment succeeds but inventory fails (quantity > 100). The saga automatically compensates by cancelling the payment:
+---
+
+### 4. ✅ Process Payment — Success (amount ≤ 1000)
 
 ```bash
-curl -s -X POST http://localhost:8080/api/orders \
-  -H "Content-Type: application/json" \
-  -d '{"customerId":1, "productId":101, "quantity":150, "amount":100.0}'
+curl --request POST \
+  --url "http://localhost:8081/payment?orderId=550e8400-e29b-41d4-a716-446655440000&amount=500"
 ```
 
-**Expected:** Status = `ORDER_FAILED`  
-**Flow:** `ORDER_CREATED → PAYMENT_PENDING → PAYMENT_COMPLETED → ORDER_FAILED` (with payment compensation)
+**Expected Response (HTTP 200 OK):**
+```
+Payment Processed Successfully for Order: 550e8400-e29b-41d4-a716-446655440000
+```
+
+---
+
+### 5. ❌ Process Payment — Failure (amount > 1000)
+
+```bash
+curl --request POST \
+  --url "http://localhost:8081/payment?orderId=550e8400-e29b-41d4-a716-446655440000&amount=1500"
+```
+
+**Expected Response (HTTP 400 Bad Request):**
+```
+Payment Failed: Insufficient funds for Order: 550e8400-e29b-41d4-a716-446655440000
+```
+
+---
+
+### 6. ✅ Cancel Payment
+
+```bash
+curl --request POST \
+  --url "http://localhost:8081/payment/cancel?orderId=550e8400-e29b-41d4-a716-446655440000"
+```
+
+**Expected Response (HTTP 200 OK):**
+```
+Payment Cancelled Successfully for Order: 550e8400-e29b-41d4-a716-446655440000
+```
+
+---
+
+### 7. ✅ Reserve Inventory — Success (quantity ≤ 100)
+
+```bash
+curl --request POST \
+  --url "http://localhost:8082/inventory/reserve?orderId=550e8400-e29b-41d4-a716-446655440000&quantity=25"
+```
+
+**Expected Response (HTTP 200 OK):**
+```
+Inventory reserved successfully
+```
+
+---
+
+### 8. ❌ Reserve Inventory — Failure (quantity > 100)
+
+```bash
+curl --request POST \
+  --url "http://localhost:8082/inventory/reserve?orderId=550e8400-e29b-41d4-a716-446655440000&quantity=150"
+```
+
+**Expected Response (HTTP 400 Bad Request):**
+```
+Inventory reservation failed: Out of Stock
+```
+
+---
+
+### 9. ✅ Release Inventory
+
+```bash
+curl --request POST \
+  --url "http://localhost:8082/inventory/release?orderId=550e8400-e29b-41d4-a716-446655440000"
+```
+
+**Expected Response (HTTP 200 OK):**
+```
+Inventory released successfully
+```
+
+---
+
+## Complete Test Results Summary
+
+| #  | Service   | Endpoint                 | Scenario                  | HTTP Status        | Response Status / Body          |
+|----|-----------|--------------------------|---------------------------|--------------------|---------------------------------|
+| 1  | Order     | `POST /api/orders`       | Success (amt=100, qty=5)  | **201 Created**    | `INVENTORY_RESERVED`            |
+| 2  | Order     | `POST /api/orders`       | Payment fail (amt=5000)   | **500 Error**      | `ORDER_FAILED`                  |
+| 3  | Order     | `POST /api/orders`       | Inventory fail (qty=200)  | **500 Error**      | `ORDER_FAILED` + compensation   |
+| 4  | Payment   | `POST /payment`          | Success (amt=500)         | **200 OK**         | Payment processed               |
+| 5  | Payment   | `POST /payment`          | Fail (amt=1500)           | **400 Bad Request**| Insufficient funds              |
+| 6  | Payment   | `POST /payment/cancel`   | Cancel                    | **200 OK**         | Payment cancelled               |
+| 7  | Inventory | `POST /inventory/reserve`| Success (qty=25)          | **200 OK**         | Inventory reserved              |
+| 8  | Inventory | `POST /inventory/reserve`| Fail (qty=150)            | **400 Bad Request**| Out of stock                    |
+| 9  | Inventory | `POST /inventory/release`| Release                   | **200 OK**         | Inventory released              |
+
+---
 
 ## Environment Variables
 
@@ -270,10 +399,11 @@ The state machine is configured with **state entry actions** rather than transit
 
 ### Reactive Event Handling
 
-Spring Statemachine 4.x uses a reactive (Project Reactor) API. All `sendEvent()` calls use `Mono`-based reactive streams with explicit `.subscribe()` to ensure events are actually processed:
+Spring Statemachine 4.x uses a reactive (Project Reactor) API. All `sendEvent()` calls use `Mono`-based reactive streams with `.block()` / `.blockLast()` to ensure the saga completes synchronously before returning the response:
 
 ```java
-stateMachine.sendEvent(Mono.just(message)).subscribe();
+stateMachine.startReactively().block();
+stateMachine.sendEvent(Mono.just(message)).blockLast();
 ```
 
 ### State Persistence
