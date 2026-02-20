@@ -1,12 +1,50 @@
 {
-    "successfulOrderId": "100",
-    "failingPaymentOrderId": "201",
-    "failingInventoryOrderId": "302",
-    "testCustomer": {
-        "id": 1
+    "projectName": "DistributedTransactionalSaga",
+    "description": "Distributed order processing system using the Saga Orchestration Pattern with Spring Statemachine",
+    "services": {
+        "orderService": {
+            "port": 8080,
+            "endpoint": "/api/orders"
+        },
+        "paymentService": {
+            "port": 8081,
+            "endpoint": "/payment"
+        },
+        "inventoryService": {
+            "port": 8082,
+            "endpoint": "/inventory/reserve"
+        }
     },
-    "testProduct": {
-        "id": 1,
-        "unitPrice": 50.00
+    "testScenarios": {
+        "successfulOrder": {
+            "description": "Payment succeeds (amount <= 1000) and inventory is reserved (quantity <= 100)",
+            "request": {
+                "customerId": 1,
+                "productId": 101,
+                "quantity": 5,
+                "amount": 100.00
+            },
+            "expectedStatus": "INVENTORY_RESERVED"
+        },
+        "failingPaymentOrder": {
+            "description": "Payment fails due to insufficient funds (amount > 1000)",
+            "request": {
+                "customerId": 1,
+                "productId": 101,
+                "quantity": 5,
+                "amount": 2000.00
+            },
+            "expectedStatus": "ORDER_FAILED"
+        },
+        "failingInventoryOrder": {
+            "description": "Inventory fails due to out of stock (quantity > 100), payment is compensated",
+            "request": {
+                "customerId": 1,
+                "productId": 101,
+                "quantity": 150,
+                "amount": 100.00
+            },
+            "expectedStatus": "ORDER_FAILED"
+        }
     }
 }

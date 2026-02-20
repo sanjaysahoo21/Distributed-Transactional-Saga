@@ -10,7 +10,6 @@ import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.EnumType;
-import jakarta.persistence.GenerationType;
 
 import com.example.orderservice.state.OrderState;
 
