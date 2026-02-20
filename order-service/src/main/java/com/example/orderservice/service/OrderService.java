@@ -16,41 +16,43 @@ import reactor.core.publisher.Mono;
 @Service
 public class OrderService {
 
-    public static final String ORDER_ID_HEADER = "order_id";
+        public static final String ORDER_ID_HEADER = "order_id";
 
-    private final OrderRepository orderRepository;
-    private final StateMachineFactory<OrderState, OrderEvent> stateMachineFactory;
-    private final OrderStateMachineInterceptor orderStateMachineInterceptor;
+        private final OrderRepository orderRepository;
+        private final StateMachineFactory<OrderState, OrderEvent> stateMachineFactory;
+        private final OrderStateMachineInterceptor orderStateMachineInterceptor;
 
-    public OrderService(OrderRepository orderRepository,
-            StateMachineFactory<OrderState, OrderEvent> stateMachineFactory,
-            OrderStateMachineInterceptor orderStateMachineInterceptor) {
-        this.orderRepository = orderRepository;
-        this.stateMachineFactory = stateMachineFactory;
-        this.orderStateMachineInterceptor = orderStateMachineInterceptor;
-    }
+        public OrderService(OrderRepository orderRepository,
+                        StateMachineFactory<OrderState, OrderEvent> stateMachineFactory,
+                        OrderStateMachineInterceptor orderStateMachineInterceptor) {
+                this.orderRepository = orderRepository;
+                this.stateMachineFactory = stateMachineFactory;
+                this.orderStateMachineInterceptor = orderStateMachineInterceptor;
+        }
 
-    public Order createOrder(Order order) {
-        order.setStatus(OrderState.ORDER_CREATED);
-        Order saveOrder = orderRepository.save(order);
+        public Order createOrder(Order order) {
+                order.setStatus(OrderState.ORDER_CREATED);
+                Order saveOrder = orderRepository.save(order);
 
-        StateMachine<OrderState, OrderEvent> stateMachine = stateMachineFactory
-                .getStateMachine(saveOrder.getId().toString());
+                StateMachine<OrderState, OrderEvent> stateMachine = stateMachineFactory
+                                .getStateMachine(saveOrder.getId().toString());
 
-        // Register the interceptor on the state machine instance (Spring SM 4.x way)
-        stateMachine.getStateMachineAccessor()
-                .doWithAllRegions(accessor -> accessor.addStateMachineInterceptor(orderStateMachineInterceptor));
+                // Register the interceptor on the state machine instance (Spring SM 4.x way)
+                stateMachine.getStateMachineAccessor()
+                                .doWithAllRegions(accessor -> accessor
+                                                .addStateMachineInterceptor(orderStateMachineInterceptor));
 
-        // Use reactive start for SM 4.x
-        stateMachine.startReactively().subscribe();
+                // Use reactive start for SM 4.x
+                stateMachine.startReactively().block();
 
-        Message<OrderEvent> message = MessageBuilder
-                .withPayload(OrderEvent.CREATE_ORDER)
-                .setHeader(ORDER_ID_HEADER, saveOrder.getId())
-                .build();
-        stateMachine.sendEvent(Mono.just(message)).subscribe();
+                Message<OrderEvent> message = MessageBuilder
+                                .withPayload(OrderEvent.CREATE_ORDER)
+                                .setHeader(ORDER_ID_HEADER, saveOrder.getId())
+                                .build();
+                stateMachine.sendEvent(Mono.just(message)).blockLast();
 
-        return saveOrder;
-    }
+                // Re-fetch from DB to get the latest status after saga completion
+                return orderRepository.findById(saveOrder.getId()).orElse(saveOrder);
+        }
 
 }
